@@ -153,7 +153,7 @@ El proyecto separa la **configuración general** de los **secretos**:
 cp .env.secrets.example .env.secrets
 
 # 2. Edita .env.secrets y pega tu token real
-TELEGRAM_BOT_TOKEN=8916685897:AAH5drK4Lh6jCaY2MWd2ur6c4zn0MfHJdXY
+TELEGRAM_BOT_TOKEN=ñ{ñp´pñ´{´{´{´{´{´{´{´{´{´{´{´{´{´{
 ```
 
 `config.py` carga `.env.secrets` primero (prioridad alta) y luego `.env`, de forma automática.
