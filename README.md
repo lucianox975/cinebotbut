@@ -136,8 +136,25 @@ El bot mantiene un archivo `data/state.json` con el último estado de cada cine:
 
 ---
 
-## Seguridad
+## Seguridad — manejo de secretos
 
-- El archivo `.env` **nunca debe subirse a Git**.
-- Agrega `.env` a tu `.gitignore`.
-- El contenedor corre con usuario no-root (`pwuser`).
+El proyecto separa la **configuración general** de los **secretos**:
+
+| Archivo | ¿Contiene secretos? | ¿Se sube a Git? |
+|---|---|---|
+| `.env` | ❌ No | ✅ Sí (es seguro) |
+| `.env.secrets` | ✅ Sí (token Telegram) | ❌ No (`.gitignore`) |
+| `.env.secrets.example` | ❌ Plantilla vacía | ✅ Sí |
+
+### Setup inicial de secretos
+
+```bash
+# 1. Copia la plantilla
+cp .env.secrets.example .env.secrets
+
+# 2. Edita .env.secrets y pega tu token real
+TELEGRAM_BOT_TOKEN=8916685897:AAH5drK4Lh6jCaY2MWd2ur6c4zn0MfHJdXY
+```
+
+`config.py` carga `.env.secrets` primero (prioridad alta) y luego `.env`, de forma automática.
+

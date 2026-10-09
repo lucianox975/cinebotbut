@@ -1,8 +1,20 @@
-.env
+# ── Secretos y configuración local (NUNCA subir a Git) ──────────────────────
+.env.secrets
+.env.local
+.env.*.local
+
+# ── Datos de runtime ─────────────────────────────────────────────────────────
 data/
+
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
 logs/
 *.log

@@ -8,8 +8,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Carga variables de entorno desde .env (si existe)
-load_dotenv(override=True)
+# Carga primero los secretos (máxima prioridad), luego el resto de config.
+# .env.secrets → token de Telegram (excluido de Git)
+# .env          → configuración general (incluido en Git, sin secretos)
+_BASE_DIR = Path(__file__).parent
+load_dotenv(_BASE_DIR / ".env.secrets", override=True)
+load_dotenv(_BASE_DIR / ".env", override=False)
 
 
 def _require(key: str) -> str:
