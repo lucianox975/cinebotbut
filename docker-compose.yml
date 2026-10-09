@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml — CineAlert Chile Bot
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  cinealert:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Nombre del contenedor
+    container_name: cinealert-chile
+
+    # Política de reinicio automático
+    restart: unless-stopped
+
+    # Variables de entorno desde .env
+    env_file:
+      - .env
+
+    # Volúmenes para persistencia del estado
+    volumes:
+      # Estado JSON (sobrevive reinicios del contenedor)
+      - cinealert_data:/app/data
+      # Log opcional: descomenta para ver los logs en el host
+      # - ./logs:/app/logs
+
+    # Recursos mínimos (ajustar según tu servidor)
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+        reservations:
+          memory: 256M
+          cpus: "0.25"
+
+    # Configuración de logging de Docker
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Nombre de la red interna
+    networks:
+      - cinealert_net
+
+    # Etiquetas descriptivas
+    labels:
+      - "com.cinealert.description=Bot de monitoreo de entradas de cine en Chile"
+      - "com.cinealert.version=1.0.0"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Volúmenes
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  cinealert_data:
+    driver: local
+    labels:
+      - "com.cinealert.description=Datos persistentes del bot (state.json)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Redes
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  cinealert_net:
+    driver: bridge
