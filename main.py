@@ -18,7 +18,7 @@ from playwright.async_api import async_playwright, Browser, BrowserContext
 
 from config import AppConfig, CinemaConfig, load_config
 from notifier import notify_available, notify_error, notify_startup
-from scrapers import SCRAPER_MAP, USER_AGENT, EXTRA_HEADERS
+from scrapers import SCRAPER_MAP, USER_AGENT, EXTRA_HEADERS, check_cinemark_http
 from state import StateManager
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,6 +36,7 @@ def setup_logging(level: str) -> None:
     # Silenciar logs verbosos de librerías externas
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("playwright").setLevel(logging.WARNING)
+    logging.getLogger("curl_cffi").setLevel(logging.WARNING)
 
 
 logger = logging.getLogger(__name__)
@@ -53,23 +54,35 @@ async def check_cinema(
     """
     Ejecuta el scraper para un cine y gestiona notificaciones.
     Los errores quedan contenidos aquí para no afectar a otros cines.
+
+    - Cineplanet y Cinépolis: usan Playwright async con Chromium.
+    - Cinemark: usa curl_cffi (HTTP TLS impersonation) en un hilo con asyncio.to_thread
+      para eludir el WAF/Cloudflare.
     """
     cinema_name = cinema.name
-    scraper_fn = SCRAPER_MAP.get(cinema_name)
 
-    if scraper_fn is None:
-        logger.warning("No hay scraper registrado para '%s'. Omitiendo.", cinema_name)
-        return
-
-    page = await context.new_page()
     try:
-        logger.info("🔍 Revisando %s → %s", cinema_name, cinema.url)
-        available, detail = await scraper_fn(
-            page=page,
-            url=cinema.url,
-            timeout=cfg.playwright_timeout,
-            settle_ms=cfg.page_settle_ms,
-        )
+        if cinema_name == "Cinemark Chile":
+            logger.info("🔍 Revisando %s (HTTP curl_cffi) → %s", cinema_name, cinema.url)
+            # Ejecución en hilo separado para no bloquear el bucle de eventos
+            available, detail = await asyncio.to_thread(check_cinemark_http, cinema.url)
+        else:
+            scraper_fn = SCRAPER_MAP.get(cinema_name)
+            if scraper_fn is None:
+                logger.warning("No hay scraper registrado para '%s'. Omitiendo.", cinema_name)
+                return
+
+            page = await context.new_page()
+            try:
+                logger.info("🔍 Revisando %s (Playwright) → %s", cinema_name, cinema.url)
+                available, detail = await scraper_fn(
+                    page=page,
+                    url=cinema.url,
+                    timeout=cfg.playwright_timeout,
+                    settle_ms=cfg.page_settle_ms,
+                )
+            finally:
+                await page.close()
 
         status_icon = "✅" if available else "❌"
         logger.info("%s [%s] %s", status_icon, cinema_name, detail)
@@ -104,8 +117,6 @@ async def check_cinema(
                 movie_name=cfg.movie_name,
                 error=str(exc),
             )
-    finally:
-        await page.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

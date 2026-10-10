@@ -5,6 +5,12 @@
 # Playwright (async) — navegador headless
 playwright==1.44.0
 
+# Cliente HTTP con TLS impersonation (bypass WAF/Cloudflare para Cinemark)
+curl_cffi>=0.7.0
+
+# Parser HTML para peticiones HTTP
+beautifulsoup4>=4.12.3
+
 # Cliente HTTP async para Telegram API
 httpx==0.27.0
 

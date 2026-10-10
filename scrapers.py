@@ -11,6 +11,8 @@ Cada función recibe una página de Playwright ya abierta y retorna:
 import logging
 import re
 
+from bs4 import BeautifulSoup
+from curl_cffi import requests
 from playwright.async_api import Page, TimeoutError as PwTimeout
 
 logger = logging.getLogger(__name__)
@@ -201,8 +203,29 @@ async def check_cinepolis(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. CINEMARK
+# 3. CINEMARK (HTTP con curl_cffi para bypass WAF/Cloudflare)
 # ─────────────────────────────────────────────────────────────────────────────
+
+CINEMARK_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8"
+    ),
+    "Accept-Language": "es-CL,es;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 HORARIO_PATTERN = re.compile(
     r"\b\d{1,2}:\d{2}\s*(hs|hrs|am|pm)?\b",
@@ -210,91 +233,77 @@ HORARIO_PATTERN = re.compile(
 )
 
 
-async def check_cinemark(
-    page: Page,
-    url: str,
-    timeout: int,
-    settle_ms: int,
-) -> tuple[bool, str]:
+def check_cinemark_http(url: str, timeout: int = 15) -> tuple[bool, str]:
     """
-    Detecta si Cinemark Chile muestra horarios disponibles para la película.
+    Scraper exclusivo para Cinemark Chile usando curl_cffi (impersonando Chrome).
+    Evita la detección de automatización (Playwright/Puppeteer) y el bloqueo por Cloudflare/WAF.
 
-    Estrategia multi-nivel:
-    1. Busca botones de horario (ej. "18:20hs") en la sección de funciones.
-    2. Busca botón "Comprar entradas" o "Seleccionar función".
-    3. Busca texto de horarios en el DOM completo.
-    4. Verifica ausencia de indicadores de "próximamente".
+    Retorna:
+        (available: bool, detail: str)
     """
+    logger.debug("Cinemark HTTP: solicitando %s con curl_cffi impersonate='chrome120'", url)
+
     try:
-        await _safe_navigate(page, url, timeout, settle_ms)
-
-        # Esperar contenido dinámico
-        try:
-            await page.wait_for_selector(
-                ".showtimes, .schedule, [class*='showtime'], [class*='horario'],"
-                " [class*='schedule'], .movie-detail",
-                timeout=10000,
-            )
-        except PwTimeout:
-            logger.debug("Cinemark: timeout esperando sección de horarios, continuando...")
-
-        # ── Nivel 1: Botones con texto de horario ──────────────────────────
-        # Busca botones que contengan patrones de hora (ej. "18:20")
-        page_content = await page.content()
-        horario_matches = HORARIO_PATTERN.findall(page_content)
-        if horario_matches:
-            # Verificar que sean botones interactivos (no texto plano)
-            time_buttons = page.locator(
-                "button, a[role='button'], .showtime-button, "
-                "[class*='showtime'], [class*='horario']"
-            ).filter(has_text=re.compile(r"\d{1,2}:\d{2}"))
-
-            count = await time_buttons.count()
-            if count > 0:
-                sample = (await time_buttons.first.inner_text()).strip()
-                return True, f"✅ {count} horario(s) disponible(s). Primero detectado: '{sample}'"
-
-        # ── Nivel 2: Botón de compra / selección de función ───────────────
-        buy_selectors = [
-            "button[class*='buy'], button[class*='purchase'], button[class*='ticket']",
-            "a[class*='buy-ticket'], a[class*='purchase']",
-            "button[class*='select-showtime'], button[class*='book']",
-        ]
-        for sel in buy_selectors:
-            loc = page.locator(sel).first
-            if await loc.count() > 0 and await loc.is_visible():
-                text = (await loc.inner_text()).strip()
-                if not await loc.is_disabled():
-                    return True, f"✅ Botón de compra activo detectado: '{text}'"
-
-        # Fallback texto
-        for text in ["Comprar entradas", "Seleccionar función", "Comprar", "Buy"]:
-            loc = page.get_by_role("button", name=re.compile(text, re.I)).first
-            if await loc.count() > 0 and not await loc.is_disabled():
-                t = (await loc.inner_text()).strip()
-                return True, f"✅ Botón de compra encontrado: '{t}'"
-
-        # ── Nivel 3: Texto de horarios en el HTML ─────────────────────────
-        lower_content = page_content.lower()
-        horarios_raw = HORARIO_PATTERN.findall(page_content)
-        if horarios_raw:
-            return True, f"✅ Texto con {len(horarios_raw)} horario(s) detectado en la página."
-
-        # ── Nivel 4: Indicadores negativos ────────────────────────────────
-        negative_keywords = [
-            "próximamente", "proximamente", "coming soon",
-            "preventa próximamente", "no hay funciones",
-        ]
-        for kw in negative_keywords:
-            if kw in lower_content:
-                return False, f"Página muestra indicador negativo: '{kw}'"
-
-        return False, "No se detectaron horarios ni botones de compra activos."
-
-    except PwTimeout:
-        raise TimeoutError(f"Timeout al cargar Cinemark ({url})")
+        response = requests.get(
+            url,
+            impersonate="chrome120",
+            headers=CINEMARK_HEADERS,
+            timeout=timeout,
+            allow_redirects=True,
+        )
     except Exception as exc:
-        raise RuntimeError(f"Error inesperado en Cinemark: {exc}") from exc
+        logger.error("Cinemark HTTP error de conexión: %s", exc)
+        return False, f"⚠️ Error de conexión HTTP hacia Cinemark: {exc}"
+
+    # 1. Validación de código de estado (Anti-Bot / Cloudflare)
+    if response.status_code in (403, 429):
+        logger.warning("Cinemark HTTP bloqueado por WAF/Cloudflare (HTTP %d)", response.status_code)
+        return False, f"⚠️ BLOQUEADO por WAF/Cloudflare (HTTP {response.status_code})"
+    elif response.status_code == 404:
+        return False, "❌ Página no encontrada (HTTP 404)"
+    elif response.status_code != 200:
+        return False, f"⚠️ Respuesta HTTP inusual ({response.status_code})"
+
+    # 2. Parseo del HTML con BeautifulSoup
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    # Contenedores de horarios típicos de Cinemark (Material-UI y clases semánticas)
+    schedule_containers = soup.select(
+        "[class*='pfbuym'], [class*='horario'], [class*='showtime'], "
+        "[class*='schedule'], section:has([class*='Mui']), .movie-detail"
+    )
+
+    # Buscar horarios en elementos interactivos o contenedores
+    horas_detectadas: list[str] = []
+
+    # Extraer horas en botones o elementos interactivos
+    for el in soup.find_all(["button", "a", "span", "div"]):
+        txt = el.get_text(strip=True)
+        if re.fullmatch(r"\d{1,2}:\d{2}(?:\s*hs)?", txt, re.IGNORECASE):
+            horas_detectadas.append(txt)
+
+    # Si no se hallaron en texto exacto, buscar en los contenedores de funciones
+    if not horas_detectadas:
+        for cont in schedule_containers:
+            matches = HORARIO_PATTERN.findall(cont.get_text())
+            if matches:
+                horas_detectadas.extend(matches)
+
+    horas_unicas = list(dict.fromkeys(horas_detectadas))
+    if horas_unicas:
+        return True, f"✅ Funciones disponibles detectadas ({len(horas_unicas)} horarios: {', '.join(horas_unicas[:5])})"
+
+    # 3. Verificación de indicadores negativos
+    body_text = soup.get_text(separator=" ", strip=True).lower()
+    negative_keywords = [
+        "próximamente", "proximamente", "coming soon",
+        "no hay funciones", "sin funciones disponibles",
+    ]
+    for kw in negative_keywords:
+        if kw in body_text:
+            return False, f"Página indica película en '{kw}' — sin funciones activas."
+
+    return False, "No se detectaron horarios ni funciones en el HTML de Cinemark."
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -304,5 +313,5 @@ async def check_cinemark(
 SCRAPER_MAP = {
     "Cineplanet Chile": check_cineplanet,
     "Cinépolis Chile": check_cinepolis,
-    "Cinemark Chile": check_cinemark,
 }
+
